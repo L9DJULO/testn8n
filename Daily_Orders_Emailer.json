@@ -1,0 +1,528 @@
+{
+  "name": "Daily_Orders_Emailer",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Lecture + décision\nOutbox = emails déjà envoyés (anti-doublon : `order_number|email_type`).\nLe nœud Code applique les 5 règles et renvoie les emails à envoyer et les erreurs.",
+        "width": 740,
+        "height": 380,
+        "color": 7
+      },
+      "id": "889457d2-8234-4159-a84a-883121bd8aa1",
+      "name": "Note : lecture et décision",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        460,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Envoi par lots\nLots de 5 emails, 2 s de pause entre chaque lot.",
+        "width": 1000,
+        "height": 380,
+        "color": 6
+      },
+      "id": "337d4c29-a160-4e87-a986-569917de8783",
+      "name": "Note : envoi",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1220,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Config\n`demo_today` vide = date du jour (Europe/Paris), sinon date simulée YYYY-MM-DD.",
+        "width": 500,
+        "height": 380,
+        "color": 4
+      },
+      "id": "13a6c9db-37f7-4aaf-af15-d18cd2ee2e74",
+      "name": "Note : config",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -60,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7 * * *"
+            }
+          ]
+        }
+      },
+      "id": "bd2a4345-ac7c-408b-ad93-519b73feea29",
+      "name": "Cron 07:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        200
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "dea23c03-9423-44fc-af2e-02c5e074e061",
+      "name": "Lancement manuel",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "6f26dda3-3ff0-464e-a13a-d77ed8d1309a",
+              "name": "sheet_id",
+              "value": "ID_DU_GOOGLE_SHEET",
+              "type": "string"
+            },
+            {
+              "id": "6ed46df2-076e-47c1-a94d-e0f570388ec1",
+              "name": "demo_today",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "beb2e14d-4bbb-4e2e-a419-6bc8a36d5438",
+              "name": "internal_email",
+              "value": "ops@example.com",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "8851142d-a56f-4885-ae66-8a165b33fee7",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Config').first().json.sheet_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Outbox",
+          "mode": "name"
+        },
+        "options": {
+          "outputFormatting": {
+            "values": {
+              "general": "UNFORMATTED_VALUE",
+              "date": "SERIAL_NUMBER"
+            }
+          }
+        }
+      },
+      "id": "d4871a76-efcd-40c6-a380-68ee17e15337",
+      "name": "Lire Outbox",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        520,
+        300
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Config').first().json.sheet_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "orders",
+          "mode": "name"
+        },
+        "options": {
+          "outputFormatting": {
+            "values": {
+              "general": "UNFORMATTED_VALUE",
+              "date": "SERIAL_NUMBER"
+            }
+          }
+        }
+      },
+      "id": "443c47fb-7b66-45e2-a52e-46bce87ccfaf",
+      "name": "Lire orders",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        760,
+        300
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const STATUSES = ['Commande_confirmee', 'En_preparation', 'Prepare', 'Livre'];\n\nconst E72H = 'Email_72h_commande_confirmee';\nconst PREP_OK = 'Email_commande_en_preparation_sans_retard';\nconst PREP_LATE = 'Email_commande_en_preparation_en_retard';\nconst E24H = 'Email_24h_commande_en_preparation';\nconst INTERNAL = 'Email_interne_post_retard_10j';\n\nconst TEMPLATES = {\n  [E72H]: {\n    subject: 'Votre commande aura un peu de retard',\n    body: `Bonjour,\n\nNous revenons vers vous au sujet de votre commande {{order_number}}.\n\nLa livraison était initialement prévue avant le {{delivery_date_to}}, mais nous n’avons pas encore tout reçu de la part de nos fournisseurs.\n\nNous tenions à vous informer que nous continuons de suivre votre commande.\nNous faisons le maximum pour pouvoir vous livrer au plus vite, et nous reviendrons vers vous dès que nous aurons plus d’informations sur la date de livraison.\n\nMerci pour votre patience,`,\n  },\n  [PREP_OK]: {\n    subject: 'Votre commande arrive très vite !',\n    body: `Bonjour,\n\nBonne nouvelle : votre commande {{order_number}} est maintenant en préparation.\n\nNous avons tout reçu de la part de nos fournisseurs. Nous faisons tout le nécessaire pour vous livrer au plus vite.\n\nVous devriez recevoir votre commande dans 3 jours.\n\nDès qu’elle sera remise au transporteur, vous recevrez un email avec le lien de suivi.\n\nMerci pour votre patience,`,\n  },\n  [PREP_LATE]: {\n    subject: 'Votre commande arrive bientôt !',\n    body: `Bonjour,\n\nBonne nouvelle : nos équipes sont actuellement pleinement mobilisées pour finaliser la préparation de votre commande {{order_number}}, afin qu’elle puisse être expédiée dans les plus brefs délais.\n\nLa livraison était initialement prévue avant le {{delivery_date_to}}. Nous faisons le maximum pour que votre commande arrive au plus vite.\n\nVous recevrez automatiquement un email lorsque votre commande sera expédiée.\n\nIl n’est pas nécessaire de relancer notre service suite à ce message : nous sommes directement informés de la situation et vous tiendrons au courant dès que possible.\n\nMerci pour votre confiance.\n\nCordialement,`,\n  },\n  [E24H]: {\n    subject: 'Votre commande arrive bientôt !',\n    body: `Bonjour,\n\nNous avons constaté que la préparation de votre commande {{order_number}} n’est pas encore finalisée.\n\nLa livraison était initialement prévue le {{delivery_date_to}}. Elle sera probablement livrée avant 3 jours, mais nous tenions à vous informer de ce léger retard.\n\nDès lors que la commande sera expédiée, vous recevrez un email de la part de notre transporteur. Et vous pourrez suivre la commande avec un lien de suivi.\n\nMerci pour votre patience,`,\n  },\n  [INTERNAL]: {\n    subject: 'Ticket retard 10j — commande {{order_number}}',\n    body: `Bonjour,\n\nLa commande {{order_number}} est en retard de plus de 10 jours (date limite initiale : {{delivery_date_to}}) et n’est toujours pas en préparation.\n\nStatut actuel : {{status}}\n\nEntreprise : {{company}}\n\nEmail client : {{email}}\n\nMerci de traiter ce cas manuellement.`,\n  },\n};\n\nconst EMAIL_REGEX = /^[^\\s@;,]+@[^\\s@;,]+\\.[^\\s@;,]+$/;\n\nfunction parisToday(now = new Date()) {\n  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(now);\n}\n\nfunction parseDate(value) {\n  if (typeof value === 'number' && value > 0) {\n    return new Date(Date.UTC(1899, 11, 30) + Math.floor(value) * 86400000).toISOString().slice(0, 10);\n  }\n  const text = String(value ?? '').trim();\n  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(text)) return null;\n  const date = new Date(`${text}T00:00:00Z`);\n  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === text ? text : null;\n}\n\nfunction daysBetween(from, to) {\n  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86400000);\n}\n\nfunction render(text, vars) {\n  return text.replace(/\\{\\{(\\w+)\\}\\}/g, (_, name) => vars[name]);\n}\n\nfunction buildEmail(type, to, vars) {\n  return {\n    to,\n    subject: render(TEMPLATES[type].subject, vars),\n    body: render(TEMPLATES[type].body, vars),\n    email_type: type,\n    order_number: vars.order_number,\n    dedup_key: `${vars.order_number}|${type}`,\n  };\n}\n\nfunction decide({ orders, outbox, today, internalEmail }) {\n  const sent = new Set();\n  const contactedToday = new Set();\n  for (const row of outbox) {\n    const order = String(row.order_number ?? '').trim();\n    if (!order || !row.email_type) continue;\n    sent.add(`${order}|${row.email_type}`);\n    if (row.run_date === today && row.email_type !== INTERNAL) contactedToday.add(order);\n  }\n\n  const occurrences = {};\n  for (const row of orders) {\n    const order = String(row.order_number ?? '').trim();\n    if (order) occurrences[order] = (occurrences[order] || 0) + 1;\n  }\n\n  const emails = [];\n  const errors = [];\n\n  for (const row of orders) {\n    const order = String(row.order_number ?? '').trim();\n    const status = String(row.status ?? '').trim();\n    const email = String(row.email ?? '').trim();\n    const addError = (code, message) => errors.push({ order_number: order, row_number: row.row_number, code, message });\n\n    if (!order && !status && !email) continue;\n    if (!order) { addError('MISSING_ORDER_NUMBER', 'Numéro de commande vide'); continue; }\n    if (occurrences[order] > 1) { addError('DUPLICATE_ORDER_NUMBER', 'Numéro de commande présent plusieurs fois'); continue; }\n    if (!STATUSES.includes(status)) { addError('UNKNOWN_STATUS', `Statut inconnu : \"${status}\"`); continue; }\n    if (status === 'Prepare' || status === 'Livre') continue;\n\n    const deadline = parseDate(row.delivery_date_to);\n    if (!deadline) { addError('INVALID_DELIVERY_DATE', `delivery_date_to vide ou invalide : \"${row.delivery_date_to ?? ''}\"`); continue; }\n\n    const daysLeft = daysBetween(today, deadline);\n    const has = (type) => sent.has(`${order}|${type}`);\n    const vars = {\n      order_number: order,\n      delivery_date_to: deadline.split('-').reverse().join('/'),\n      status,\n      company: String(row.company ?? '').trim(),\n      email,\n    };\n\n    let clientEmail = null;\n    if (status === 'Commande_confirmee' && daysLeft <= 3 && !has(E72H)) {\n      clientEmail = E72H;\n    }\n    if (status === 'En_preparation') {\n      if (!has(PREP_OK) && !has(PREP_LATE)) clientEmail = has(E72H) ? PREP_LATE : PREP_OK;\n      else if (daysLeft <= 1 && !has(E72H) && !has(E24H)) clientEmail = E24H;\n    }\n\n    if (clientEmail && !contactedToday.has(order)) {\n      if (EMAIL_REGEX.test(email)) emails.push(buildEmail(clientEmail, email, vars));\n      else addError('INVALID_EMAIL', `Email client vide ou invalide : \"${email}\"`);\n    }\n\n    if (status === 'Commande_confirmee' && daysLeft <= -10 && !has(INTERNAL)) {\n      emails.push(buildEmail(INTERNAL, internalEmail, vars));\n    }\n  }\n\n  return { emails, errors };\n}\n\nconst config = $('Config').first().json;\nconst today = String(config.demo_today || '').trim() || parisToday();\nif (!/^\\d{4}-\\d{2}-\\d{2}$/.test(today)) throw new Error('demo_today doit être au format YYYY-MM-DD');\n\nconst { emails, errors } = decide({\n  orders: $('Lire orders').all().map((item) => item.json),\n  outbox: $('Lire Outbox').all().map((item) => item.json),\n  today,\n  internalEmail: config.internal_email,\n});\n\nreturn [\n  ...emails.map((email) => ({ json: { kind: 'email', run_date: today, ...email } })),\n  ...errors.map((error) => ({ json: { kind: 'error', run_date: today, ...error } })),\n];\n"
+      },
+      "id": "a52f784f-c083-4229-a4d1-fa4c2ac1f3a0",
+      "name": "Décider les emails",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "289f76a1-ddfc-41ad-a4e8-fbfcca282290",
+                    "leftValue": "={{ $json.kind }}",
+                    "rightValue": "email",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Emails"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "d14c2ca9-61b1-4004-a531-da01ff1824a1",
+                    "leftValue": "={{ $json.kind }}",
+                    "rightValue": "error",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Erreurs"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3e44c920-427e-445d-a495-8295eb8c3045",
+      "name": "Switch",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 5,
+        "options": {}
+      },
+      "id": "b2013bdc-a361-4ed8-a683-98babbb28f24",
+      "name": "Lots de 5",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1480,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "98fa4422-399a-4fe3-a9c1-c989dda64a28",
+              "name": "timestamp",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            },
+            {
+              "id": "18457bd3-b372-4b5e-a3a6-920b8fa7dcec",
+              "name": "batch",
+              "value": "={{ $runIndex + 1 }}",
+              "type": "number"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "3f288fb0-b5bd-4c58-a7bb-10737ddab813",
+      "name": "Horodater",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1720,
+        -40
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Config').first().json.sheet_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Outbox",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {
+          "cellFormat": "RAW",
+          "handlingExtraData": "ignoreIt"
+        }
+      },
+      "id": "103bb8cc-82ad-49dd-a26c-3a8a3afb2002",
+      "name": "Écrire dans Outbox",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1960,
+        -40
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 2,
+        "unit": "seconds"
+      },
+      "id": "daa64711-6552-4e34-ad4c-03994767d885",
+      "name": "Attendre 2 s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2200,
+        -40
+      ],
+      "webhookId": "daaad336-276d-4559-ad0e-765f96c17cd7"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $('Config').first().json.sheet_id }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "errors",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {
+          "cellFormat": "RAW",
+          "handlingExtraData": "ignoreIt"
+        }
+      },
+      "id": "6b5e0ccd-cdf8-40e7-a75d-96e79dbb64e6",
+      "name": "Écrire errors",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1480,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "Cron 07:00": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lancement manuel": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Lire Outbox",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lire Outbox": {
+      "main": [
+        [
+          {
+            "node": "Lire orders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lire orders": {
+      "main": [
+        [
+          {
+            "node": "Décider les emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Décider les emails": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Lots de 5",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Écrire errors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lots de 5": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Horodater",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Horodater": {
+      "main": [
+        [
+          {
+            "node": "Écrire dans Outbox",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Écrire dans Outbox": {
+      "main": [
+        [
+          {
+            "node": "Attendre 2 s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attendre 2 s": {
+      "main": [
+        [
+          {
+            "node": "Lots de 5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Paris"
+  },
+  "pinData": {},
+  "meta": {},
+  "tags": []
+}
